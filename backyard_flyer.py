@@ -41,7 +41,19 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.LOCAL_POSITION` is received and self.local_position contains new data
         """
-        pass
+        if not self.in_mission:
+            return
+
+        if self.flight_state == States.TAKEOFF:
+            if np.abs(self.target_position[2] - (-self.local_position[2])) < 0.1:
+                self.all_waypoints = self.calculate_box()
+                self.waypoint_transition()
+        elif self.flight_state == States.WAYPOINT:
+            if np.linalg.norm(self.target_position[:2] - self.local_position[:2]) < 0.1:
+                if len(self.all_waypoints) > 0:
+                    self.waypoint_transition()
+                else:
+                    self.landing_transition()
 
     def velocity_callback(self):
         """
@@ -49,7 +61,9 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.LOCAL_VELOCITY` is received and self.local_velocity contains new data
         """
-        pass
+        if self.flight_state == States.LANDING:
+            if np.abs(self.target_position[2] - (-self.local_position[2])) < 0.1:
+                self.disarming_transition()
 
     def state_callback(self):
         """
@@ -57,14 +71,28 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.STATE` is received and self.armed and self.guided contain new data
         """
-        pass
+        if self.in_mission:
+            if self.flight_state == States.MANUAL:
+                self.arming_transition()
+            elif self.flight_state == States.ARMING:
+                if self.armed and self.guided:
+                    self.takeoff_transition()
+            elif self.flight_state == States.DISARMING:
+                if not self.armed:
+                    self.manual_transition()
 
     def calculate_box(self):
         """TODO: Fill out this method
         
         1. Return waypoints to fly a box
         """
-        pass
+        return [
+            # (north, east, up, heading)
+            np.array([5., 0., 3., 0.]),
+            np.array([5., 5., 3., .5 * np.pi]),
+            np.array([0., 5., 3., np.pi]),
+            np.array([0., 0., 3., -.5 * np.pi]),
+        ]
 
     def arming_transition(self):
         """TODO: Fill out this method
@@ -75,6 +103,10 @@ class BackyardFlyer(Drone):
         4. Transition to the ARMING state
         """
         print("arming transition")
+        self.take_control()
+        self.arm()
+        self.set_home_as_current_position()
+        self.flight_state = States.ARMING
 
     def takeoff_transition(self):
         """TODO: Fill out this method
@@ -84,6 +116,9 @@ class BackyardFlyer(Drone):
         3. Transition to the TAKEOFF state
         """
         print("takeoff transition")
+        self.target_position[2] = 3.0
+        self.takeoff(3.0)
+        self.flight_state = States.TAKEOFF
 
     def waypoint_transition(self):
         """TODO: Fill out this method
@@ -92,6 +127,15 @@ class BackyardFlyer(Drone):
         2. Transition to WAYPOINT state
         """
         print("waypoint transition")
+        self.target_position = self.all_waypoints.pop(0)
+        print("target position:", self.target_position)
+        self.cmd_position(
+            self.target_position[0],
+            self.target_position[1],
+            self.target_position[2],
+            self.target_position[3],
+        )
+        self.flight_state = States.WAYPOINT
 
     def landing_transition(self):
         """TODO: Fill out this method
@@ -100,6 +144,8 @@ class BackyardFlyer(Drone):
         2. Transition to the LANDING state
         """
         print("landing transition")
+        self.land()
+        self.flight_state = States.LANDING
 
     def disarming_transition(self):
         """TODO: Fill out this method
@@ -108,6 +154,8 @@ class BackyardFlyer(Drone):
         2. Transition to the DISARMING state
         """
         print("disarm transition")
+        self.disarm()
+        self.flight_state = States.DISARMING
 
     def manual_transition(self):
         """This method is provided
